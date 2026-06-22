@@ -11,9 +11,18 @@
 ---
 ## 🖼️ Visualizations
 
-| Forecast Dashboard | Feature Importance | Streaming Simulation |
-|---|---|---|
-| ![dashboard](images/dashboard_preview.png) | ![importance](images/feature_importance.png) | ![streaming](images/streaming_simulation.png) |
+### 📊 Real-Time Forecasting & Metrics Dashboard
+![Dashboard Preview](images/dashboard_preview.png)
+
+---
+
+### 🌲 LightGBM Feature Importance (Top Features)
+![Feature Importance](images/feature_importance.png)
+
+---
+
+### 🔄 Asynchronous Streaming Simulation Pipeline Architecture
+![Streaming Simulation](images/streaming_simulation.png)
 
 ---
 
