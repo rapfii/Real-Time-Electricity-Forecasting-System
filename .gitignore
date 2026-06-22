@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.gemini/
+
+# Environment
+.env
+
+# Artifacts (generated at runtime — model, reports)
+artifacts/*.lgb
+artifacts/*.json
+
+# Dataset files (too large for git — download separately)
+data/
+Dataset/
+
+# MLflow
+mlruns/
+mlflow.db
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+notebooks/
+
+# Testing / cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
