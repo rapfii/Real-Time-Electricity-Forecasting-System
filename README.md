@@ -88,12 +88,12 @@ Translating technical forecasting metrics into grid-balancing intelligence:
 
 Running the full pipeline produces a comprehensive output across data processing, model training, evaluation, and interactive dashboarding:
 
-### 1. Data Preprocessing & Validation (`core/data_loader.py` & `core/features.py`)
+### 1. Data Preprocessing & Validation (`core/data_loader.py` & `core/feature_engine.py`)
 - **Data Integrity**: Automatically loads and combines the raw PJM datasets. Enforces schema validation using `pandera`.
 - **Publication Lag & Alignment**: Guarantees zero look-ahead bias by aligning cross-regional variables using chronological sequences.
 - **Output**: Prepares **116,183 complete rows** spanning from 2005 to 2018.
 
-### 2. Feature Engineering & Generation (`core/features.py`)
+### 2. Feature Engineering & Generation (`core/feature_engine.py`)
 - **Scale-Invariant Features**: Creates 65 features including 24-hour lags, rolling averages, rolling standard deviations (24h, 48h, 168h), and ratios (e.g., `pjme_to_pjmw_ratio`).
 - **Fourier Trignometric Transforms**: Converts timestamps into seasonal sinusoidal waves to capture diurnal, weekly, and annual cycles.
 
@@ -223,8 +223,8 @@ Real-Time-Electricity-Forecasting-System/
 │
 ├── core/                    # Core mathematical and data pipelines
 │   ├── data_loader.py       # Pandera-validated dataset loader
-│   ├── features.py          # 65 scale-invariant features and transforms
-│   ├── pricing.py           # Deterministic quadratic pricing engine
+│   ├── feature_engine.py    # 65 scale-invariant features and transforms
+│   ├── pricing_engine.py    # Deterministic quadratic pricing engine
 │   └── metrics.py           # Load & price evaluation metrics
 │
 ├── models/                  # ML models and baseline modules
@@ -234,14 +234,15 @@ Real-Time-Electricity-Forecasting-System/
 │
 ├── streaming/               # Real-time data pipeline simulation
 │   ├── rate_limiter.py      # Asyncio Token-bucket rate limiter
-│   ├── replay.py            # Chronological grid events replay engine
-│   ├── buffer.py            # Sliding window feature buffer
+│   ├── replay_engine.py     # Chronological grid events replay engine
+│   ├── feature_buffer.py    # Sliding window feature buffer
 │   └── pipeline.py          # Asyncio streaming orchestration
 │
 ├── api/                     # FastAPI microservice
 │   ├── app.py               # Main application setup
 │   ├── routes.py            # REST endpoints and WebSocket handler
-│   └── schemas.py           # REST request and response schema models
+│   ├── schemas.py           # REST request and response schema models
+│   └── websocket.py         # WebSocket connection manager
 │
 ├── dashboard/               # Monitoring UI
 │   └── app.py               # Streamlit application
@@ -249,13 +250,16 @@ Real-Time-Electricity-Forecasting-System/
 ├── scripts/                 # CLI Command entrypoints
 │   ├── train.py             # Model training orchestrator
 │   ├── stream.py            # Streaming simulation orchestrator
-│   └── evaluate.py          # Baseline comparison and performance report
+│   ├── evaluate.py          # Baseline comparison and performance report
+│   └── generate_plots.py    # Generates dashboard and simulation visual assets
 │
 ├── tests/                   # Pytest suite
-│   ├── test_core.py         # Tests for loader, features, and pricing
-│   ├── test_models.py       # Tests for LightGBM and baselines
-│   ├── test_streaming.py    # Tests for buffer, rate-limiter, and replay
-│   └── test_api.py          # API route and WebSocket client tests
+│   ├── test_feature_engine.py   # Tests for feature engineering
+│   ├── test_pricing_engine.py   # Tests for quadratic pricing logic
+│   ├── test_feature_buffer.py   # Tests for sliding window buffer
+│   ├── test_rate_limiter.py     # Tests for token-bucket rate limiter
+│   ├── test_pipeline.py         # Tests for streaming orchestration
+│   └── test_api.py              # API route and WebSocket client tests
 │
 ├── artifacts/               # Saved model (.lgb) and execution reports
 ├── data/                    # Local dataset path
