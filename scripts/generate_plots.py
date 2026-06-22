@@ -111,7 +111,7 @@ def generate_dashboard_preview(settings, X, y, pricing, forecaster):
     
     plt.tight_layout(rect=[0.18, 0.01, 0.99, 0.93])
     
-    output_path = Path("images/dashboard_preview.png")
+    output_path = Path("images/dashboard_preview_v2.png")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(output_path, dpi=130, facecolor=fig.get_facecolor(), edgecolor="none")
     plt.close()
@@ -168,7 +168,7 @@ def generate_feature_importance():
         )
         
     plt.tight_layout()
-    output_path = Path("images/feature_importance.png")
+    output_path = Path("images/feature_importance_v2.png")
     plt.savefig(output_path, dpi=130, facecolor=fig.get_facecolor(), edgecolor="none")
     plt.close()
     print(f"Saved feature importance plot to {output_path}")
@@ -220,7 +220,7 @@ def generate_streaming_simulation():
             ha="center", va="center", fontsize=13, fontweight="bold", color="#0DF2C9")
     
     plt.tight_layout()
-    output_path = Path("images/streaming_simulation.png")
+    output_path = Path("images/streaming_simulation_v2.png")
     plt.savefig(output_path, dpi=130, facecolor=fig.get_facecolor(), edgecolor="none")
     plt.close()
     print(f"Saved streaming simulation flowchart to {output_path}")
