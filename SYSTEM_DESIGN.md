@@ -484,6 +484,8 @@ This function is used in **two** places with different semantics:
 
 The function itself is identical. The noise `ε` is added externally in the ground-truth simulator only.
 
+> **Design Note — Static Coefficients:** The pricing coefficients (α=15.0, β=0.005, γ=0.000002) are parameterized via `config/settings.py` and overridable via environment variables, but they remain **static per session**. In a real energy market, the supply stack shifts daily due to fuel price fluctuations (e.g., Henry Hub natural gas index) and renewable generation availability (merit-order effect). A production-grade system would require a **secondary calibration pipeline** that re-estimates these coefficients inter-day. This is documented as a future enhancement in Section 22.1.
+
 ---
 
 ## 11. Repository Architecture
@@ -1093,8 +1095,11 @@ A: Logical time advances by exactly 1 hour per event (matching the dataset granu
 | Risk | Impact | Mitigation |
 |---|---|---|
 | **Synthetic pricing function** | Prices are not real market prices; system cannot be validated against actual PJM LMPs | Clearly documented as simulation. The ML model (load forecasting) is validated against real data. |
-| **Univariate input** | Model uses only historical load. Real load forecasting uses weather, economic indicators, calendar events | Acknowledged. See Section 22 for optional enhancements. |
-| **Stationarity assumption** | Model trained on 2002–2015 data may not generalize to 2015–2018 due to demand growth, efficiency improvements | Walk-forward validation explicitly tests this. Expanding window incorporates structural changes. |
+| **Static pricing coefficients** | The quadratic coefficients (α, β, γ) are fixed per session. In real markets, the supply stack shifts daily due to fuel costs (natural gas) and renewable penetration (merit-order effect). A static curve will produce systematic pricing errors during commodity price shocks. | Coefficients are parameterized via `config/settings.py` and overridable via environment variables, enabling per-session adjustment. Inter-day dynamic recalibration is documented as a future enhancement (Section 22.1). |
+| **Univariate input (no weather)** | Model uses only historical load and temporal encodings. It is blind to exogenous weather shocks (heatwaves, polar vortexes). If an extreme temperature event occurs that has no precedent in the lag window, the model will underpredict load because lag features carry no forward-looking weather signal. | Acknowledged as a fundamental limitation of the dataset scope. See Section 22.1 for detailed weather integration roadmap including CDH/HDH transformations and forecast-lag alignment strategy. |
+| **Point forecast only (no uncertainty)** | The model produces a single load estimate per timestep. For grid operators and energy traders, the critical information is not the mean prediction but the tail risk — how wrong can the forecast be during peak demand? Without prediction intervals, the system provides no actionable risk quantification. | Acknowledged. See Section 22.2 for LightGBM quantile regression roadmap (Q05/Q50/Q95 pipeline with Price Prediction Intervals). |
+| **Cross-regional publication lag assumption** | The system assumes all 5 auxiliary zone load values are available instantaneously at the same timestamp as PJME. In a live production environment, each regional operator publishes load data with different latencies (e.g., AEP may lag 15 minutes, DOM may lag 30 minutes). The model is trained on perfectly synchronized historical data, which creates a train-serve skew if deployed against live feeds. | For this simulation, the consolidated PJM historical dataset is already post-hoc synchronized. Cross-regional features use `shift(1)` (1-hour lag) which provides implicit temporal buffer. Production readiness plan in Section 22.1. |
+| **Stationarity assumption** | Model trained on 2005–2015 data may not generalize to 2015–2018 due to demand growth, efficiency improvements | Walk-forward validation explicitly tests this. Expanding window incorporates structural changes. |
 | **No concept drift detection** | No automated retraining trigger | Rolling MAPE monitoring with alerting thresholds (Section 13.4). Manual retrain decision. |
 | **Noise model simplicity** | `ε ~ N(0, 4)` is a simplistic price noise model | Intentionally simple. Real market noise is heteroskedastic and fat-tailed. Not the focus of this system. |
 
@@ -1105,6 +1110,7 @@ A: Logical time advances by exactly 1 hour per event (matching the dataset granu
 | **Memory pressure** | Full dataset in memory (~145K rows × 48 features) during training | ~56MB for training matrix. Negligible on modern hardware. |
 | **Single-process** | No horizontal scaling | Out of scope for local simulation. Architecture supports future extraction to worker processes. |
 | **Feature buffer cold start** | First 168 events produce no predictions | Documented behavior. Warm-up events are excluded from metrics. |
+| **In-memory state volatility** | The `FeatureBuffer` stores all rolling window state (168 hours of multi-region load data) in `collections.deque` in application RAM. If the FastAPI process crashes or is restarted, this state is lost entirely, requiring a 168-hour (1 week) warmup blackout before valid predictions resume. | Acceptable for local simulation scope. For production deployment, state persistence via Redis Sorted Sets or a Feature Store (Feast/Hopsworks) would enable zero-warmup recovery. See Section 22.2. |
 
 ---
 
@@ -1121,16 +1127,64 @@ A: Logical time advances by exactly 1 hour per event (matching the dataset granu
 | **[OPTIONAL] Real LMP prices** | PJM Data Miner API (historical LMP data) | Replace synthetic pricing with actual market prices. Enables real price model training. |
 | **[OPTIONAL] Economic indicators** | FRED API (GDP, industrial production index) | Long-term demand trend correction. |
 
+#### 22.1.1 [OPTIONAL] Exogenous Weather Forecast Integration (Detailed Roadmap)
+
+The current model is blind to exogenous weather shocks. To address this:
+
+1. **Data Source:** Ingest hourly weather forecast data (temperature, humidity, wind speed) from NOAA ISD stations covering the PJM East service territory. Use **forecast data released 1–2 hours before inference time**, not actuals at the target hour, to prevent look-ahead bias.
+2. **Non-Linear Thermal Transformations:** Raw temperature has a U-shaped relationship with load (high consumption in both extreme cold and extreme heat). Transform temperature into:
+   - **Cooling Degree Hours (CDH):** `max(0, T - 65°F)` — captures air conditioning demand.
+   - **Heating Degree Hours (HDH):** `max(0, 65°F - T)` — captures heating demand.
+   - Interaction terms: `CDH × hour_of_day` to capture time-varying cooling load profiles.
+3. **Lag Alignment:** Weather forecast features must be shifted by their publication lag (e.g., if NOAA publishes a forecast 2 hours before the target period, align the feature to `t-2` in the training pipeline).
+4. **Expected Impact:** Based on published energy forecasting literature, adding weather features to a lag-based LightGBM model typically reduces MAPE by 30–50%, with the largest gains during extreme temperature events (heatwaves, polar vortexes) where lag-only models fail.
+
+#### 22.1.2 [OPTIONAL] Dynamic Parametric Pricing Engine
+
+The current pricing engine uses static coefficients (α, β, γ) per session. To model real supply-stack dynamics:
+
+1. **Calibration Pipeline:** Create a secondary data pipeline that ingests daily fuel price indices (e.g., Henry Hub natural gas spot price) and regional renewable generation capacity factors.
+2. **Coefficient Re-estimation:** Re-estimate (α, β, γ) daily or inter-day using a least-squares fit of the quadratic form against the previous day's realized supply stack clearing prices.
+3. **Merit-Order Effect:** When renewable penetration is high (e.g., midday solar surplus), the effective α (intercept) drops because cheap renewables displace expensive gas peakers. The pipeline should shift the curve downward accordingly.
+4. **Implementation:** Extend `config/settings.py` to accept time-varying coefficient overrides. The `PricingEngine` already reads coefficients from settings — no structural code change needed, only a new upstream calibration module.
+
+#### 22.1.3 [OPTIONAL] Strict Publication Lag Masking (Cross-Regional)
+
+For production deployment against live data feeds:
+
+1. **Audit Publication Latencies:** Determine the actual publication delay for each auxiliary zone (PJMW, AEP, DAYTON, DOM, DUQ) from the respective regional operators.
+2. **Training-Time Masking:** In `core/data_loader.py`, shift auxiliary zone columns by their respective maximum publication latency (e.g., if AEP lags by 15 minutes, shift AEP features by 1 additional hour in the training pipeline).
+3. **Invariant:** The model must be trained on the **same information structure** that will be available at inference time. If a zone's data arrives 30 minutes late, the model should never see that zone's current-hour value during training.
+4. **Current Mitigation:** Cross-regional features already use `shift(1)` (1-hour lag), providing an implicit temporal buffer that partially addresses this concern for the simulation context.
+
 ### 22.2 Architecture Improvements (No External Data)
 
 | Enhancement | Description |
 |---|---|
 | **Online learning** | Incrementally update model weights as new data arrives (LightGBM supports `init_model`). |
 | **Ensemble methods** | Combine LightGBM + XGBoost via stacking or simple averaging. |
-| **Probabilistic forecasting** | LightGBM quantile regression for prediction intervals (10th, 50th, 90th percentiles). |
 | **Containerization** | Docker Compose for API + dashboard + MLflow. Still local, but reproducible. |
 | **CI/CD pipeline** | GitHub Actions for lint + test + training validation on push. |
 | **Grafana dashboards** | Replace Streamlit with Grafana + Prometheus for production-grade monitoring (if deployment scope expands). |
+
+#### 22.2.1 Probabilistic Energy Forecasting (Quantile Regression Pipeline)
+
+Upgrade from point forecasting to distributional forecasting:
+
+1. **Objective Function:** Replace `"objective": "regression"` with `"objective": "quantile"` in LightGBM. Train three separate models (or a single model with multi-output) targeting quantiles **Q0.05**, **Q0.50** (median), and **Q0.95**.
+2. **Loss Function:** Use Pinball Loss (Quantile Loss) for each quantile: `L(y, ŷ, τ) = τ·max(y-ŷ, 0) + (1-τ)·max(ŷ-y, 0)`.
+3. **Price Prediction Intervals:** Pass all three load quantile predictions through the pricing engine independently: `Price_low = f(Load_Q05)`, `Price_mid = f(Load_Q50)`, `Price_high = f(Load_Q95)`. The resulting price band reflects both load uncertainty and the non-linear price amplification at high loads.
+4. **Dashboard Integration:** Render the prediction interval as a shaded band (fill between Price_low and Price_high) on the Streamlit dashboard, with the median line overlaid. This immediately communicates to grid operators when forecast confidence is low (wide band) vs. high (narrow band).
+5. **Tail-Risk Metric:** Add **Winkler Score** and **Coverage Probability** to the evaluation metrics (Section 16) to measure interval calibration quality.
+
+#### 22.2.2 Persistent Distributed State Store (Production Graduation)
+
+For deployment beyond local simulation:
+
+1. **Problem:** The `FeatureBuffer` uses `collections.deque` in application RAM. Process crash = total state loss = 168-hour warmup blackout.
+2. **Solution:** Migrate the sliding window state to a **Redis Sorted Set** (keyed by timestamp, scored by epoch). On each `LoadEvent`, update the sorted set with a `ZADD` command. On process restart, reconstruct the `FeatureBuffer` from Redis in milliseconds (zero-warmup recovery).
+3. **Alternative:** Use a dedicated Feature Store (Feast or Hopsworks) to serve pre-computed features with built-in versioning and point-in-time correctness.
+4. **Scope Boundary:** This enhancement is only relevant for multi-instance deployment (e.g., Kubernetes). The current local simulation architecture is intentionally designed without external infrastructure dependencies.
 
 ---
 
